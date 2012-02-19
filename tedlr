@@ -1,0 +1,130 @@
+#!/usr/bin/env python
+import os
+from glob import glob
+from datetime import datetime
+from optparse import OptionParser
+import StringIO
+import logging
+
+import pycurl
+import feedparser
+
+_VERSION='%prog 0.1'
+
+_FEED_URL = 'http://feeds.feedburner.com/tedtalks_video'
+_URL_LIST='url.txt'
+_DOWNLOAD_LIST='diff.txt'
+
+def _get_today_folder_name():
+    return datetime.now().strftime("%Y%m%d")
+
+def _prepare():
+
+    def fetch_url_list():
+
+        def get_url_list():
+            curl = pycurl.Curl()
+            curl.setopt(pycurl.URL, _FEED_URL)
+            if _PROXY and _PORT:
+                curl.setopt(pycurl.PROXY, _PROXY)
+                curl.setopt(pycurl.PROXYPORT, int(_PORT))
+                curl.setopt(pycurl.PROXYTYPE, pycurl.PROXYTYPE_SOCKS5)
+            buf = StringIO.StringIO()
+            curl.setopt(pycurl.WRITEFUNCTION, buf.write)
+            logging.debug('fetching list...')
+            curl.perform()
+
+            d = feedparser.parse(buf.getvalue())
+            return [(e.feedburner_origlink, e.feedburner_origenclosurelink)
+                    for e in d.entries]
+
+        if not os.path.isdir(_TODAY_FOLDER):
+            os.makedirs(_TODAY_FOLDER)
+        fn = os.path.join(_TODAY_FOLDER, _URL_LIST)
+        fo = file(fn, 'w')
+        fo.write('\n'.join([' '.join(e) for e in get_url_list()]))
+        fo.close()
+
+    def get_previous_dir():
+
+        def collect_existing_dirs():
+            return [path for path in glob(os.path.join(_LIBRARY, '*'))
+                    if os.path.isdir(path)
+                    and os.path.isfile(os.path.join(path, _URL_LIST))]
+
+        d = collect_existing_dirs()
+        d.sort()
+        assert d[-1] == _TODAY_FOLDER
+        if len(d) > 1:
+            return d[-2]
+
+    def generate_new_list(prev_dir):
+
+        def get_new_files():
+
+            def get_files_map(fn):
+                fi = file(fn)
+                res = dict([l.split() for l in fi])
+                fi.close()
+                return res
+
+            if prev_dir:
+                prev_list = os.path.join(prev_dir, _URL_LIST)
+                prev_set = set(get_files_map(prev_list).keys())
+            else:
+                prev_set = set()
+
+            current_list = os.path.join(_TODAY_FOLDER, _URL_LIST)
+            current_map = get_files_map(current_list)
+            current_set = set(current_map.keys())
+
+            return [current_map[link] for link in list(current_set - prev_set)]
+
+        logging.debug('finding new files...')
+        fo = file(os.path.join(_TODAY_FOLDER, _DOWNLOAD_LIST), 'w')
+        fo.write('\n'.join(get_new_files()))
+        fo.close()
+
+    fetch_url_list()
+    generate_new_list(get_previous_dir())
+
+def _download():
+    fn = os.path.join(_TODAY_FOLDER, _DOWNLOAD_LIST)
+    assert os.path.isfile(fn)
+    logging.debug('starting download...')
+    assert os.system('wget -Nci %s -P %s' % (fn, _TODAY_FOLDER)) == 0
+
+def main():
+    _prepare()
+    _download()
+
+if __name__ == '__main__':
+    usage = "usage: %prog [options]"
+    parser = OptionParser(usage=usage, version=_VERSION)
+    parser.set_defaults(
+            library=os.path.abspath(os.path.dirname(__file__)),
+            verbose=False)
+    parser.add_option('-l', '--library', dest='library', help='path to library')
+    parser.add_option('-p', '--proxy', dest='proxy', help='proxy host:port')
+    parser.add_option('-v', '--verbose', action='store_true', dest='verbose', help='verbose output')
+
+    (options, args) = parser.parse_args()
+
+    _LIBRARY = os.path.abspath(options.library)
+    _TODAY_FOLDER = os.path.join(_LIBRARY, _get_today_folder_name())
+
+    _PROXY, _PORT = None, None
+    if options.proxy:
+        _PROXY, _PORT = options.proxy.split(':')
+
+    _VERBOSE = options.verbose
+    if _VERBOSE:
+        logging.basicConfig(level=logging.DEBUG)
+
+    logging.debug('library path: %s',  _LIBRARY)
+    logging.debug('today folder: %s', _TODAY_FOLDER)
+    logging.debug('proxy: %s', _PROXY)
+    logging.debug('proxy port: %s', _PORT)
+
+    main()
+
