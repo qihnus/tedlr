@@ -92,7 +92,7 @@ def _download():
     fn = os.path.join(_TODAY_FOLDER, _DOWNLOAD_LIST)
     assert os.path.isfile(fn)
     logging.debug('starting download...')
-    assert os.system('wget -Nci %s -P %s' % (fn, _TODAY_FOLDER)) == 0
+    assert os.system('wget -Nci "%s" -P "%s"' % (fn, _TODAY_FOLDER)) == 0
 
 def main():
     _prepare()
